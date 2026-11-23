@@ -1,9 +1,10 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 import models
 import schemas
-from security import hash_password  # ייבוא פונקציית ההצפנה שיצרנו
+from security import hash_password, verify_password, create_access_token
 
 app = FastAPI(title="מערכת ניהול משימות")
 
@@ -42,7 +43,25 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     # 4. החזרת האובייקט - FastAPI ימיר אותו אוטומטית לפי סכמת UserResponse (id ו-username בלבד)
     return new_user
 
+# ---------- Authentication / Login ----------
+@app.post("/login", response_model=schemas.Token)
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    # 1. חיפוש המשתמש במסד הנתונים לפי שם המשתמש שהוזן בטופס
+    user = db.query(models.User).filter(models.User.name == form_data.username).first()
 
+    # 2. בדיקה שהמשתמש קיים ושהסיסמה תואמת ל-Hash השמור ב-DB
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="שם משתמש או סיסמה שגויים",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 3. הנפקת טוקן JWT עם מזהה המשתמש
+    access_token = create_access_token(data={"sub": str(user.id)})
+
+    # 4. החזרת הטוקן למבקש
+    return {"access_token": access_token, "token_type": "bearer"}
 # ---------- Users (הנתיבים הקיימים שלך) ----------
 @app.get("/users", response_model=list[schemas.UserOut])
 def get_users(db: Session = Depends(get_db)):
